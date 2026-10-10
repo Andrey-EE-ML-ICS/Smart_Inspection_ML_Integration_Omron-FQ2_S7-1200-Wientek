@@ -145,6 +145,16 @@ Current judgment threshold for both cameras: `Judgement = 0`.
 
 ![](sample_image_stat_from_HMI/Image_stat.jpg)
 
+
+Class encoding: acceptable = 0 (positive class), defective = -1 (negative class).
+All metrics (Precision, Recall, F1) are calculated with respect to the "acceptable" class (pos_label=0).
+Consequently:
+
+False Positive (FP) – failure to detect a defect (defective item classified as acceptable)
+
+False Negative (FN) – over-rejection (acceptable item classified as defective)
+
+
 Based on continuous monitoring on a high‑speed production line (nominal throughput ~100,000 units per 12‑hour shift), the following rejection performance was recorded:
 
 * **Total processed products:** 73,596 units.
