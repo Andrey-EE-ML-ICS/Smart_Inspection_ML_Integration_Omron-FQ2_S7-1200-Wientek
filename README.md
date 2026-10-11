@@ -163,8 +163,8 @@ Based on continuous monitoring on a high‑speed production line (nominal throug
   * *Camera 2 (outgoing inspection):* 199 activations.
   * *Detected by both cameras:* 159 units.
 * **QC Validation Results:**
-  * **Missed defects (False Negative):** 0 units. (During the statistics collection period, QC inspectors did not detect any defective product reaching the customer.)
-  * **False alarms / Over‑rejection (False Positive):** 3 units. (Only 3 cases of unnecessary rejection out of 73,596 bottles due to dynamic conveyor vibrations.)
+  * **Missed defects (False Positive):** 0 units. (During the statistics collection period, QC inspectors did not detect any defective product reaching the customer.)
+  * **False alarms / Over‑rejection (False Negative):** 3 units. (Only 3 cases of unnecessary rejection out of 73,596 bottles due to dynamic conveyor vibrations.)
 
 ### Final Mathematical Model Metrics (LogRegressor) on Real Production Flow
 
