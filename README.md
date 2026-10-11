@@ -1,175 +1,191 @@
 # Smart_Inspection_ML_Integration_Omron-FQ2_S7-1200-Wientek
 
-## Общая информация о проекте
+## General Project Overview
 
-Монорепозиторий:  для оценки соответствия качества крышки бутылки например отсутствие, замятие, неправильная посадка. Логика системы отбраковки строится на трёх устройствах:
-1.	 PLC Siemens S7-1200
-2.	 Камера OMRON-FQ2
-3.	 Панель визуализации HMI Wientek.
+Monorepository for quality assessment of bottle caps, e.g., detecting absence, crumpling, or incorrect seating. The rejection logic is based on three devices:
 
-### Siemens S7-1200(PLC)
- отвечает за работу с датчиками, подсчёт положения бутылки относительно камеры и выталкивателя(pusher), через энкодер, работу камеры(когда фотографируем), получение результата от камеры(брак/не брак), и соответственно выталкиваем или нет бутылку с линии, сбор статистики.
+1.	PLC Siemens S7‑1200
+2.	Camera OMRON‑FQ2
+3.	HMI Visualization Panel Wientek.
 
-### Камера OMRON-FQ2
- отвечает за обработку изображения, даёт показатели корреляции объекта, её положение и угол наклона. Камера может быть обучена на выделение множества частей одного объекта. В нашем случае это общий вид крышки бутылки, нижний край крышки. Камеру необходимо пред обучить на определённую крышку, может запомнить отдельно до 32 рецептов. В данном проекте используется 4 рецепта(крышки). Модель Логистической регрессии(LogRegressor) загружена в камеру и именно по ML принимается решение брак/не брак, которое и передаётся на Siemens S7-1200
+### Siemens S7‑1200 (PLC)
 
-### HMI Wientek(панель визуализации)
- визуализирует статистику работы бракиратора, даёт возможность редактировать рецепт(подстраивать количество импульсов энкодера), переключение рецептов на камере, включение-отключение отдельно камер и выталкивателя(pusher).
+Responsible for:
+- Handling sensors;
+- Calculating the bottle position relative to the camera and pusher using an encoder;
+- Triggering the camera (when to take a photo);
+- Receiving the result from the camera (OK / NG);
+- Activating the pusher to eject defective bottles;
+- Collecting statistics.
 
+### Camera OMRON‑FQ2
 
- ## Алгоритм работы браковщика (FIFO / Очередь сдвига)
+Responsible for image processing and providing object correlation metrics, position, and tilt angle. The camera can be trained to detect multiple parts of a single object. In this project, it inspects the overall view of the bottle cap and the lower edge of the cap.
 
-1. **Триггер съёмки:** Бутылка пересекает датчик наличия  ПЛК фиксирует текущее значение энкодера и подает импульс на запуск камеры Omron FQ2, когда значение энкодера достигнет уставки рецепта `Координата Камера=Координата датчика + Дельта_импульсов (задается с HMI)`.
-2. **Анализ:** Камера выполняет инспекцию, прогоняет признаки через LogRegressor и возвращает результат (`OK` / `NG`) в ПЛК через PROFINET.
-3. **Сопровождение:** ПЛК вычисляет целевую координату энкодера для выталкивателя: `Координата выталкивания = Координата съёмки + Дельта_импульсов (задается с HMI)`. Результат помещается в программную очередь (FIFO / массив сопровождения).
-4. **Отбраковка:** При достижении энкодером целевой координаты, если статус бутылки `NG`, ПЛК активирует пневмоцилиндр (Pusher).
+The camera can store up to 32 separate recipes. This project uses 4 recipes (cap types). A Logistic Regression model (LogRegressor) is loaded into the camera; ML‑based decision (OK/NG) is made inside the camera and transmitted to the Siemens S7‑1200.
 
-## Расположение камер
+### HMI Wientek (Visualization Panel)
 
-                     [ Камера 2 (Входной контроль) ]
-                                          │
-                                          ▼ Зона видимости Cam2 (FOV)
-   ────────────────────────────────────────────────────────────►
-   Направление                                         
-   движения ──────►    (Бутылка)        ────────────────────────► 
-   конвейера                                 
-   ────────────────────────────────────────────────────────────►
-                           
-                            ▲         Смещение 20 см между камерами
-                            │ Зона видимости Cam1 (FOV)
-                     [ Камера 1 (Выходной контроль) ]
+Provides visualization of the rejector’s statistics and allows:
+- Editing recipes (adjusting encoder pulse counts);
+- Switching camera recipes;
+- Individually enabling/disabling cameras and the pusher.
 
-## Схема архитектуры
+## Rejector Operation Algorithm (FIFO / Shift Queue)
+
+1. **Capture Trigger:** When a bottle crosses the presence sensor, the PLC records the current encoder value and triggers the Omron FQ2 camera when the encoder reaches the recipe setpoint:  
+   `Camera Coordinate = Sensor Coordinate + Delta Pulses` (set via HMI).
+2. **Analysis:** The camera performs inspection, runs features through the LogRegressor, and returns the result (`OK` / `NG`) to the PLC via PROFINET.
+3. **Tracking:** The PLC calculates the target encoder coordinate for the pusher:  
+   `Pusher Coordinate = Capture Coordinate + Delta Pulses` (set via HMI).  
+   The result is stored in a software queue (FIFO / tracking array).
+4. **Rejection:** When the encoder reaches the target coordinate and the bottle status is `NG`, the PLC activates the pneumatic cylinder (Pusher).
+
+## Camera Layout
+
 ```
-Датчик → PLC (энкодер) → триггер камеры → FQ2 (инспекция + LogRegressor)
-                                              ↓ OK/NG
-                                        PLC (FIFO очередь)
-                                              ↓
-                                        Pusher (пневмоцилиндр)
-                                              ↓
-                                        HMI (статистика, рецепты)
-```     
+                 [ Camera 2 (Incoming Inspection) ]
+                                      │
+                                      ▼ Field of View (FOV) of Cam2
+────────────────────────────────────────────────────────────►
+Direction of
+conveyor movement ──────► (Bottle) ────────────────────────►
+────────────────────────────────────────────────────────────►
 
 
-
-## Структура проекта
-
-| Путь | Назначение |
-|------|------------|
-| `14112025cam1_2026_01_23-16_09_39_OK.csv` | Данные на которых обучалась камера 1 OMRON FQ2 не брак. Перед камерой проходил только не брак|
-| `14112025cam1_2026_01_27-09_15_10_NG_part1.csv` |Данные часть 1 на которых обучалась камера 1 OMRON FQ2 брак. Перед камерой проходил только брак|
-| `14112025cam1_2026_01_27-09_44_53_NG_part2.csv` | Данные часть 2 на которых обучалась камера 1 OMRON FQ2 брак. Перед камерой проходил только брак |
-| `14112025cam2_2026_01_23-15_43_32_OK.csv` | Данные на которых обучалась камера 2 OMRON FQ2 не брак. Перед камерой проходил только не брак|
-| `14112025cam2_2026_01_27-10_36_41_NG.csv` |Данные на которых обучалась камера 2 OMRON FQ2 брак. Перед камерой проходил только брак|
-| `Camera1.ipynb` | Ноутбук содержит код Python, где предобрабатывались данные, объединялись данные брака и не брака. Обучение модели, снятие метрик. Для камеры 1|
-| `Camera2.ipynb` | Ноутбук содержит код Python, где предобрабатывались данные, объединялись данные брака и не брака. Обучение модели, снятие метрик. Для камеры 2|
-| `Rejector_Original_Panel.cmtp` | Файл содержит проект EasyBuilder Wientek, на котором реализованы человеко-машиный интерфейс и визуализация работы бракиратора|
-| `Rejector_PLC_S7_1200_with_Omron_FQ2.zap17` | Архив проекта TIA Portal V17, так же содержит файлы EDS для поддержки в сети PROFINET камеры OMRON FQ2|
-| `cam1.bkd` | Полный backup с работающий камеры 1 OMRON FQ2|
-| `cam2.bkd` | Полный backup с работающий камеры 2 OMRON FQ2|
-| `Image_camera1` | Директория с изображением с результатами отбраковки камеры 1|
-| `Image_camera2` | Директория с изображением с результатами отбраковки камеры 2|
-| `Image_sample_shape_teach_camera` | Директория с изображением образцов обучения камеры на крышку, две формы. Общий вид крышки(**P0**) и положение нижнего края крышки(**P1**). Обучение одинаково для обеих камер |
-
-## Данные файлов CSV
-
-Данные собирались не посредственно с помощью камер в 2 этапа. 
-1. этап ~ около 1300 бутылок, не допускалось попадания под камеру брака эти файлы CSV имеют в название OK. 
-2. этап логировался только брак на конвейер, перед камерами выставлялся заранее подготовленый брак в размере 200 единиц и подовался на конвейер бракиратора, в случайном положение относительно камеры, примерно ~ 600 запесей.
-
-Ниже список итоговых признаков на которых обучалась модель логистической регрессии. 
+                        ▲         Offset of 20 cm between cameras
+                        │ Field of View (FOV) of Cam1
+                 [ Camera 1 (Outgoing Inspection) ]
 ```
-0   Judge       int64  результат отбраковки брак -1, не брак 0 (фактически выставляется вручную при обработке данных, так как результат от камер не релевантен при сборе данных)  
-1   P0.DY              float64 - На сколько смещён обнаруженый колпачёк относительно колпачка на котором обучилась камера
-2   P0.CR              float64 - Коэффициент корреляци по общему виду крышки
-3   P1.DY              float64 - На сколько смещёна крышка
-4   P1.CR              float64 - Коэффициент корреляции нижний кромке крышки
-5   P1.angle_sin       float64 - созданый признак, основаный на угле поворота нижней кромке крышки.
-```
-**Важно!!! Две формы('P0','P1') в камере  Shape Search III для логистической регрессии должны обучаться на одном объекте**
 
-**Пример обучение 'P0', тип в камере  Shape Search III**
+## Architecture Diagram
+```
+Sensor → PLC (encoder) → camera trigger → FQ2 (inspection + LogRegressor)
+                                                    ↓ OK/NG
+                                                    PLC (FIFO queue)
+                                                    ↓
+                                                    Pusher (pneumatic cylinder)
+                                                    ↓
+                                                    HMI (statistics, recipes)
+
+```
+
+## Project Structure
+
+| Path | Purpose |
+|------|---------|
+| `14112025cam1_2026_01_23-16_09_39_OK.csv` | Training data for Camera 1 (OMRON FQ2), OK samples only. Only non‑defective caps passed in front of the camera. |
+| `14112025cam1_2026_01_27-09_15_10_NG_part1.csv` | Training data part 1 for Camera 1, NG samples only. Only defective caps passed in front of the camera. |
+| `14112025cam1_2026_01_27-09_44_53_NG_part2.csv` | Training data part 2 for Camera 1, NG samples only. Only defective caps passed in front of the camera. |
+| `14112025cam2_2026_01_23-15_43_32_OK.csv` | Training data for Camera 2 (OMRON FQ2), OK samples only. Only non‑defective caps passed in front of the camera. |
+| `14112025cam2_2026_01_27-10_36_41_NG.csv` | Training data for Camera 2, NG samples only. Only defective caps passed in front of the camera. |
+| `Camera1.ipynb` | Jupyter notebook with Python code for data preprocessing, merging OK/NG data, model training, and metrics calculation for Camera 1. |
+| `Camera2.ipynb` | Jupyter notebook with Python code for data preprocessing, merging OK/NG data, model training, and metrics calculation for Camera 2. |
+| `Rejector_Original_Panel.cmtp` | EasyBuilder Wientek project file containing the HMI and visualization of the rejector operation. |
+| `Rejector_PLC_S7_1200_with_Omron_FQ2.zap17` | TIA Portal V17 project archive, includes EDS files for PROFINET support of the OMRON FQ2 camera. |
+| `cam1.bkd` | Full backup of the working Camera 1 (OMRON FQ2). |
+| `cam2.bkd` | Full backup of the working Camera 2 (OMRON FQ2). |
+| `Image_camera1` | Directory with sample images showing Camera 1 rejection results. |
+| `Image_camera2` | Directory with sample images showing Camera 2 rejection results. |
+| `Image_sample_shape_teach_camera` | Directory with training sample images for camera teaching; two shapes. Overall cap view (**P0**) and lower edge position (**P1**). Teaching is identical for both cameras. |
+
+## CSV Data Description
+
+Data was collected directly from the cameras in two stages:
+
+1. Stage 1: ~1300 bottles; no defects were allowed under the camera. These CSV files are marked with `OK` in the filename.
+2. Stage 2: Only defective samples were logged. Pre‑prepared defects (~200 units) were fed onto the conveyor in random positions relative to the cameras, yielding approximately ~600 records.
+
+### Final Features Used for Logistic Regression Training
+
+| Index | Feature | Type | Description |
+|-------|---------|------|-------------|
+| 0 | Judge | int64 | Rejection result: defect = -1, no defect = 0. Manually assigned during data processing because camera results were not relevant for data collection. |
+| 1 | P0.DY | float64 | Offset of the detected cap relative to the taught cap. |
+| 2 | P0.CR | float64 | Correlation coefficient for the overall cap view. |
+| 3 | P1.DY | float64 | Offset of the cap (for lower edge). |
+| 4 | P1.CR | float64 | Correlation coefficient for the lower edge of the cap. |
+| 5 | P1.angle_sin | float64 | Derived feature based on the rotation angle of the lower edge. |
+
+**Important:** Both shapes (**P0**, **P1**) in the camera’s Shape Search III must be trained on the same object.
+
+**Example of ‘P0’ training (Shape Search III type in the camera)**
 
 ![](Image_shape_teach/Train_P0.png)
 
-**Пример обучение 'P1', тип в камере  Shape Search III**
+**Example of ‘P1’ training (Shape Search III type in the camera)**
 
 ![](Image_shape_teach/Train_P1.png)
 
-**Пример не брака**
+**Example of OK sample**
 
 ![](Image_camera1/Sampl_OK_1.png)
 
-**Пример брака**
+**Example of NG sample**
 
 ![](Image_camera1/Sample_NG_3.png)
 
-**Пример брака**
+**Example of NG sample**
 
 ![](Image_camera1/Sample_NG_2.png)
 
+## Final Logistic Regression Formula
 
-## Итоговая формула логистической регрессии
+This formula is used for both cameras. During production, an anomaly in the camera statistics was detected. Data was re‑analyzed and a data collection error was identified. If you’re interested, you can perform your own analysis to identify it. Feel free to reach out if you’d like to discuss it.
 
-Данная формула используется для обеих камер. Во время производства была обнаружена, анамолия в статистических данных работ камер. Повторно проведён анализ
-данных для обучения и выявлена ошибка при сборе данных. Если интересно можете сами провести анализ, и выявить его, если очень интересно пишите.
+**Formula is entered in the camera: SensorSetting → Calculation → Expression**
 
-**Формула набирается в камере путь SensorSetting->Calculation->Expression**
+Current judgment threshold for both cameras: `Judgement = 0`.
 
-Текущий порог для обеих камер Judgement=0
+**Result = -12.3326 + 12.2732 * ('P0.DY'+100)/(100+100) + 7.8835 * 'P0.CR'/100 - 1.8909 * ('P1.DY'+100)/(100+100) + 2.0263 * 'P1.CR'/100 - 3.4869 * ABS(SIN('P1.TH'))**
 
-**Результат = -12.3326 + 12.2732 * ('P0.DY'+100)/(100+100) + 7.8835 * 'P0.CR'/100 - 1.8909 * ('P1.DY'+100)/(100+100) + 2.0263 * 'P1.CR'/100 - 3.4869 * ABS(SIN('P1.TH'))**
+## Performance Metrics (Pilot Industrial Operation)
 
-
-
-## Метрики эффективности (Данные опытно-промышленной эксплуатации)
-
-**Фото с панели HMI. Статистика**
+**HMI Panel Screenshot – Statistics**
 
 ![](sample_image_stat_from_HMI/Image_stat.jpg)
 
 
-По результатам непрерывного мониторинга на действующей высокоскоростной производственной линии (номинальный поток ~100 000 шт. / 12-часовая смена) были зафиксированы следующие показатели работы системы отбраковки:
+Class encoding: acceptable = 0 (positive class), defective = -1 (negative class).
+All metrics (Precision, Recall, F1) are calculated with respect to the "acceptable" class (pos_label=0).
+Consequently:
 
-Кодировка классов: годная = 0 (положительный класс), брак = -1 (отрицательный).
-Все метрики (Precision, Recall, F1) рассчитаны относительно класса «годная» (pos_label=0).
-В связи с этим:
+False Positive (FP) – failure to detect a defect (defective item classified as acceptable)
 
-False Positive (FP) - пропуск брака (брак назван годной)
-
-False Negative (FN) - перебраковка (годная названа браком)
+False Negative (FN) – over-rejection (acceptable item classified as defective)
 
 
-* **Общий объем обработанной продукции:** 73 596 шт.
-* **Всего извлечено из потока (уникальных бутылок брака):** 264 шт.
-  * *Камера 1 (входной контроль):* 224 срабатывания.
-  * *Камера 2 (выходной контроль):* 199 срабатываний.
-  * *Совместное обнаружение (обе камеры):* 159 шт.
-* **Результаты валидации службой ОТК:**
-  * **Пропуск брака (False Positive):** 0 шт. (За время сбора статистики контролерами ОТК на выходе линии не зафиксировано ни одного случая пропуска дефектной продукции потребителю).
-  * **Ложные срабатывания / Перебраковка (False Negative):** 3 шт. (Зафиксировано всего 3 случая избыточного срабатывания на 73 596 бутылок из-за динамических колебаний конвейера).
+Based on continuous monitoring on a high‑speed production line (nominal throughput ~100,000 units per 12‑hour shift), the following rejection performance was recorded:
 
-### Итоговые метрики математической модели (LogRegressor) на реальном потоке:
+* **Total processed products:** 73,596 units.
+* **Total removed from the flow (unique defective bottles):** 264 units.
+  * *Camera 1 (incoming inspection):* 224 activations.
+  * *Camera 2 (outgoing inspection):* 199 activations.
+  * *Detected by both cameras:* 159 units.
+* **QC Validation Results:**
+  * **Missed defects (False Negative):** 0 units. (During the statistics collection period, QC inspectors did not detect any defective product reaching the customer.)
+  * **False alarms / Over‑rejection (False Positive):** 3 units. (Only 3 cases of unnecessary rejection out of 73,596 bottles due to dynamic conveyor vibrations.)
 
+### Final Mathematical Model Metrics (LogRegressor) on Real Production Flow
 
-* **Recall (Полнота модели):** 100% — абсолютная гарантия чистоты партии от брака укупорки.
-* **Precision (Точность модели):** 98.86% — высочайшая точность классификации, исключающая финансовые потери от сброса кондиционного товара.
-* **False Negative Rate (Уровень ложных тревог):** 0.004% — система работает стабильно в условиях сильных вибраций и люфтов.
+* **Recall (Sensitivity):** 100% — guarantees that no defective capping reaches the customer.
+* **Precision:** 98.86% — high classification accuracy, minimizing financial loss from rejecting good product.
+* **False Alarm Rate:** 0.004% — stable operation under strong vibrations and mechanical backlash.
 
-
-## Требования
+## Requirements
 
 - **Python 3.11**
-- **TIA Portal V17** - для работы с проектом Siemens S7-1200
-- **EasyBuilder** - для работы с проектом HMI Wientek
-- **TouchFinder for PC** - для работы с камерой OMRON FQ2
+- **TIA Portal V17** — for working with the Siemens S7‑1200 project.
+- **EasyBuilder** — for working with the Wientek HMI project.
+- **TouchFinder for PC** — for working with the OMRON FQ2 camera.
+
+## Setup and Installation
+
+Clone the repository:
+
+```bash
+git clone <https://github.com/Andrey-EE-ML-ICS/Smart_Inspection_ML_Integration_Omron-FQ2_S7-1200-Wientek>
 
 
-
-### Запускт и установка
- Клонирование репозитория:
- git clone 
-
-#### Лицензия
-
-См. файл `LICENSE` в корне репозитория.
+License
+See the LICENSE file in the repository root.
